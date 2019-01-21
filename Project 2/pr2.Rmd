@@ -1,0 +1,543 @@
+---
+title: 'Project 2: Modeling and Evaluation - Submitted by GT User: sanne31 (sanne31@gatech.edu)'
+subtitle: "CSE6242 - Data and Visual Analytics - Summer 2018\n\nDue: Sunday, July 24, 2018 at 11:59 PM UTC-12:00 on T-Square"
+output:
+  html_document:
+    code_folding: none
+    theme: default
+  pdf_document: default
+  html_notebook:
+    code_folding: none
+    theme: default
+---
+```{r}
+#removing all warning messages from the knit output
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      warning=FALSE, message=FALSE)
+```
+
+
+# Data
+
+We will use the same dataset as Project 1: [`movies_merged`](https://s3.amazonaws.com/content.udacity-data.com/courses/gt-cs6242/project/movies_merged).
+
+# Objective
+
+Your goal in this project is to build a linear regression model that can predict the `Gross` revenue earned by a movie based on other variables. You may use R packages to fit and evaluate a regression model (no need to implement regression yourself). Please stick to linear regression, however.
+
+# Instructions
+
+You should be familiar with using an [RMarkdown](http://rmarkdown.rstudio.com) Notebook by now. Remember that you have to open it in RStudio, and you can run code chunks by pressing *Cmd+Shift+Enter*.
+
+Please complete the tasks below and submit this R Markdown file (as **pr2.Rmd**) containing all completed code chunks and written responses, and a PDF export of it (as **pr2.pdf**) which should include the outputs and plots as well.
+
+_Note that **Setup** and **Data Preprocessing** steps do not carry any points, however, they need to be completed as instructed in order to get meaningful results._
+
+# Setup
+
+Same as Project 1, load the dataset into memory:
+
+```{r}
+load('movies_merged')
+```
+
+This creates an object of the same name (`movies_merged`). For convenience, you can copy it to `df` and start using it:
+
+```{r}
+df = movies_merged
+cat("Dataset has", dim(df)[1], "rows and", dim(df)[2], "columns", end="\n", file="")
+colnames(df)
+```
+
+## Load R packages
+
+Load any R packages that you will need to use. You can come back to this chunk, edit it and re-run to load any additional packages later.
+
+```{r}
+#install.packages("NLP",dependencies = TRUE)
+#install.packages('reshape2')
+#install.packages("tm")
+#install.packages("ggplot2")
+#install.packages("GGally")
+#install.packages("tidyr")
+#install.packages("SnowballC")
+#install.packages("lubridate")
+
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(NLP)
+library(tm)
+library(plyr)
+library(reshape2)
+library(SnowballC)
+library(lubridate)
+library(stringr)
+```
+
+If you are using any non-standard packages (ones that have not been discussed in class or explicitly allowed for this project), please mention them below. Include any special instructions if they cannot be installed using the regular `install.packages('<pkg name>')` command.
+
+**Non-standard packages used**: None
+
+# Data Preprocessing
+
+Before we start building models, we should clean up the dataset and perform any preprocessing steps that may be necessary. Some of these steps can be copied in from your Project 1 solution. It may be helpful to print the dimensions of the resulting dataframe at each step.
+
+## 1. Remove non-movie rows
+## all prework taken from exemplary assignments pr1.rmd from Canvas
+
+```{r}
+# TODO: Remove all rows from df that do not correspond to movies
+df <- df[df$Type == "movie", ]
+dim(df)
+```
+
+## 2. Drop rows with missing `Gross` value
+
+Since our goal is to model `Gross` revenue against other variables, rows that have missing `Gross` values are not useful to us.
+
+```{r}
+# TODO: Remove rows with missing Gross value
+df <- df[!is.na(df$Gross),]
+df <- df[!(df$Gross == 0),]
+```
+
+## 3. Exclude movies released prior to 2000
+
+Inflation and other global financial factors may affect the revenue earned by movies during certain periods of time. Taking that into account is out of scope for this project, so let's exclude all movies that were released prior to the year 2000 (you may use `Released`, `Date` or `Year` for this purpose).
+
+```{r}
+# TODO: Exclude movies released prior to 2000
+df <- df[!(df$Year < 2000),]
+```
+
+## 4. Eliminate mismatched rows
+
+_Note: You may compare the `Released` column (string representation of release date) with either `Year` or `Date` (numeric representation of the year) to find mismatches. The goal is to avoid removing more than 10% of the rows._
+
+```{r}
+# TODO: Remove mismatched rows
+rows <- df
+rows$Released <- as.Date(rows$Released, "%Y-%m-%d")
+rows$RelYear <- as.numeric(format(rows$Released, "%Y"))
+mismatchedrows <- rows[(rows$Year == rows$RelYear),]
+df <- subset(mismatchedrows, select = -RelYear)
+removed_perc <- ((dim(rows)[1] - dim(df)[1])/(dim(rows)[1])) * 100
+cat("Removed ",removed_perc, "% of rows")
+```
+
+## 5. Drop `Domestic_Gross` column
+
+`Domestic_Gross` is basically the amount of revenue a movie earned within the US. Understandably, it is very highly correlated with `Gross` and is in fact equal to it for movies that were not released globally. Hence, it should be removed for modeling purposes.
+
+```{r}
+# TODO: Exclude the `Domestic_Gross` column
+df$Domestic_Gross <- NULL
+```
+
+## 6. Process `Runtime` column
+
+```{r}
+# TODO: Replace df$Runtime with a numeric column containing the runtime in minutes
+#below code for this step taken from my own submission for project 1
+
+raw_run_time <- df$Runtime
+h_run_time <- as.numeric(gsub(".*?(\\d+) [Hh]r?.*", "\\1", raw_run_time))
+h_run_time[is.na(h_run_time)] <- 0
+m_run_time <- as.numeric(gsub(".*?(\\d+) [Mm]in?.*", "\\1", raw_run_time))
+m_run_time[is.na(m_run_time)] <- 0
+
+run_time <- (h_run_time * 60) + m_run_time
+
+df$Runtime <- run_time
+
+```
+
+Perform any additional preprocessing steps that you find necessary, such as dealing with missing values or highly correlated columns (feel free to add more code chunks, markdown blocks and plots here as necessary).
+
+```{r}
+# TODO(optional): Additional preprocessing
+```
+
+_**Note**: Do NOT convert categorical variables (like `Genre`) into binary columns yet. You will do that later as part of a model improvement task._
+
+## Final preprocessed dataset
+
+Report the dimensions of the preprocessed dataset you will be using for modeling and evaluation, and print all the final column names. (Again, `Domestic_Gross` should not be in this list!)
+
+```{r}
+# TODO: Print the dimensions of the final preprocessed dataset and column names
+cat("Dataset has", dim(df)[1], "rows and", dim(df)[2], "columns", end="\n", file="")
+colnames(df)
+```
+
+# Evaluation Strategy
+
+In each of the tasks described in the next section, you will build a regression model. In order to compare their performance, you will compute the training and test Root Mean Squared Error (RMSE) at different training set sizes.
+
+First, randomly sample 10-20% of the preprocessed dataset and keep that aside as the **test set**. Do not use these rows for training! The remainder of the preprocessed dataset is your **training data**.
+
+Now use the following evaluation procedure for each model:
+
+- Choose a suitable sequence of training set sizes, e.g. 10%, 20%, 30%, ..., 100% (10-20 different sizes should suffice). For each size, sample that many inputs from the training data, train your model, and compute the resulting training and test RMSE.
+- Repeat your training and evaluation at least 10 times at each training set size, and average the RMSE results for stability.
+- Generate a graph of the averaged train and test RMSE values as a function of the train set size (%), with optional error bars.
+
+You can define a helper function that applies this procedure to a given set of features and reuse it.
+
+# Tasks
+
+Each of the following tasks is worth 20 points, for a total of 100 points for this project. Remember to build each model as specified, evaluate it using the strategy outlined above, and plot the training and test errors by training set size (%).
+
+## 1. Numeric variables
+
+Use Linear Regression to predict `Gross` based on available _numeric_ variables. You can choose to include all or a subset of them.
+
+```{r}
+# TODO: Build & evaluate model 1 (numeric variables only)
+test <- df
+test$Metascore<-as.numeric(as.character(test$Metascore))
+test_na<-na.omit(test)
+numset_test<-sapply(test_na,is.numeric)
+which_numset_test<-which(numset_test)
+numset_test_vals<-test_na[,which_numset_test]
+
+numset_test_vals<-subset(numset_test_vals,select=-tomatoRotten)
+set.seed(101)
+tmp_train_vals<-sample(1:nrow(numset_test_vals),size=floor(0.8*nrow(numset_test_vals)))
+tmp_test_vals <- sample(1:nrow(numset_test_vals),size=floor(0.2*nrow(numset_test_vals)))
+rmse_func <-function(trainingset,testingset,ratio){
+  tr_rmse=c()
+  te_rmse=c()
+  for(i in 1:10){
+    set.seed(120)
+    tmp_train_vals_r<-sample(1:nrow(trainingset),size=floor(ratio*nrow(trainingset)))
+    tmp_test_df<-trainingset[tmp_train_vals_r,]
+    theta=lm(Gross~.,tmp_test_df)
+    pdct_for_te_set = predict(theta,testingset)
+    pdct_for_te_set<-as.data.frame(pdct_for_te_set)
+    val_for_test=sqrt(mean((testingset$Gross - pdct_for_te_set)^2))
+    tr_rmse=c(tr_rmse,sqrt(residuals(theta)^2))
+    te_rmse=c(te_rmse,val_for_test)
+   
+  }
+  final=c()
+  
+  final = c(final,mean(tr_rmse))
+  final =c(final,mean(te_rmse))
+  return (final)
+}
+trainer<-function(data,var_data){
+sizes = c(0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1)
+model_tr_rms = c()
+model_te_rms=c()
+tr_data_s<-data[var_data,]
+te_data_s<-data[-var_data,]
+for (val in sizes)
+{
+   rms_result=rmse_func(tr_data_s,te_data_s,val)
+   print (rms_result)
+   model_tr_rms = c(model_tr_rms,rms_result[1])
+   model_te_rms=c(model_te_rms,rms_result[2])
+}
+rmse_model1<-data.frame(sizes,model_tr_rms,model_te_rms)
+return( rmse_model1)
+
+
+}
+model1=trainer(numset_test_vals,tmp_train_vals)
+
+ggplot(model1,aes(sizes))+geom_line(aes(y=model_tr_rms))
+
+model1=trainer(numset_test_vals, tmp_test_vals)
+ggplot(model1,aes(sizes))+geom_line(aes(y=model_te_rms))
+
+```
+
+**Q**: List the numeric variables you used.
+
+**A**: the numeric variables I used in the above task are:  Year,Runtime,Metascore,imdbRating,imdbVotes,tomatoMeter,tomatoRating,tomatoReviews,tomatoFresh,tomatoUserMeter,tomatoUserRating,tomatoUserReviews,Budget
+
+
+**Q**: What is the best mean test RMSE value you observed, and at what training set size?
+
+**A**: The best mean RMSE value I observed was 58643637 which was at the training set size of 85%.
+
+
+## 2. Feature transformations
+
+Try to improve the prediction quality from **Task 1** as much as possible by adding feature transformations of the numeric variables. Explore both numeric transformations such as power transforms and non-numeric transformations of the numeric variables like binning (e.g. `is_budget_greater_than_3M`).
+
+```{r}
+# TODO: Build & evaluate model 2 (transformed numeric variables only)
+numset_test_vals$t_rat_pr2<-numset_test_vals$tomatoRating^2
+numset_test_vals$t_rat_pr3<-numset_test_vals$tomatoRating^3
+
+numset_test_vals$t_fresh_pr2<-numset_test_vals$tomatoFresh^2
+numset_test_vals$t_fresh_pr3<-numset_test_vals$tomatoFresh^3
+
+numset_test_vals$t_usrev_pr2<-numset_test_vals$tomatoUserReviews^2
+numset_test_vals$t_usrev_pr3<-numset_test_vals$tomatoUserReviews^3
+
+numset_test_vals$t_usmet_pr2<-numset_test_vals$tomatoUserMeter^2
+numset_test_vals$t_usmet_pr3<-numset_test_vals$tomatoUserMeter^3
+
+numset_test_vals$t_usrat_pr2<-numset_test_vals$tomatoUserRating^2
+numset_test_vals$t_usrat_pr3<-numset_test_vals$tomatoUserRating^3
+
+numset_test_vals$t_rev_pr2<-numset_test_vals$tomatoReviews^2
+numset_test_vals$t_rev_pr3<-numset_test_vals$tomatoReviews^3
+
+numset_test_vals$t_met_pr2<-numset_test_vals$tomatoMeter^2
+numset_test_vals$t_met_pr3<-numset_test_vals$tomatoMeter^3
+
+numset_test_vals$rt_pr2<-numset_test_vals$Runtime^2
+numset_test_vals$rt_pr3<-numset_test_vals$Runtime^3
+
+numset_test_vals$ms_pr2<-numset_test_vals$Metascore^2
+numset_test_vals$ms_pr3<-numset_test_vals$Metascore^3
+
+numset_test_vals$imdb_votes_pr2<-numset_test_vals$imdbVotes^2
+numset_test_vals$imdb_votes_pr3<-numset_test_vals$imdbVotes^3
+
+transformed_runtime<-test_na$Runtime
+numset_test_vals$rt_Bin<-cut(transformed_runtime,seq(min(transformed_runtime)-1,max(transformed_runtime)+1,(max(transformed_runtime) - min(transformed_runtime)+2)/6),right=FALSE,labels=c(1:6))
+numset_test_vals$rt_Bin<-as.numeric(numset_test_vals$rt_Bin)
+
+binned_imdb_rat<-numset_test_vals$imdbRating
+numset_test_vals$binned_imdb_rating_val<-cut(binned_imdb_rat,seq(min(binned_imdb_rat)-1,max(binned_imdb_rat)+1,(max(binned_imdb_rat) - min(binned_imdb_rat)+2)/4),right=FALSE,labels=c(1:4))
+numset_test_vals$binned_imdb_rating_val<-as.numeric(numset_test_vals$binned_imdb_rating_val)
+fitted_model1 <- lm(Gross~., data = numset_test_vals)
+summary(fitted_model1)
+
+
+numset_test_vals<-subset(numset_test_vals,select=-c(t_rat_pr2,t_rat_pr3,t_fresh_pr2,t_fresh_pr3,t_usmet_pr2,t_usmet_pr3,t_usrat_pr2,t_usrat_pr3,t_met_pr2,t_met_pr3,rt_pr2,rt_pr3,ms_pr2,ms_pr3,imdb_votes_pr2,rt_Bin))
+model2=trainer(numset_test_vals,tmp_train_vals)
+
+ggplot(model1,aes(sizes))+geom_line(aes(y=model_tr_rms))
+
+
+```
+
+**Q**: Explain which transformations you used and why you chose them.
+
+**A**: I chose to do some simple power transformations upon the selected numeric variables. I simply used a squared power and a cubed power transformation upon them which made trhe transformation simple and but still had some noticeable change. I also decided to bin the imdb rating values together in the thought that it might improve upon the current existing model.  
+
+
+**Q**: How did the RMSE change compared to Task 1?
+
+**A**: I could see a considerable change in the RMSE values at first glance itself. In this model, we can see that the highest mean RMSE value is 57185394 and at a training size of 100%. We can also see the variance between various training set sizes and the RMSE values tends to decrease as compared to the first model.
+
+
+## 3. Non-numeric variables
+
+Write code that converts genre, actors, directors, and other categorical variables to columns that can be used for regression (e.g. binary columns as you did in Project 1). Also process variables such as awards into more useful columns (again, like you did in Project 1). Now use these converted columns only to build your next model.
+
+```{r}
+# TODO: Build & evaluate model 3 (converted non-numeric variables only)
+#df_nagenre<-test_na
+#nagenre<-df_nagenre$Genre
+#applying text mining transformations to the genre column to encode it
+tm_file = Corpus(VectorSource(test_na$Genre))
+#removing all whitespaces from the column from each row
+tm_file <- tm_map(tm_file, stripWhitespace)
+#converting all values into lower case characters
+tm_file <- tm_map(tm_file, tolower)
+#removing any punctuation marks such as , or . etc. 
+tm_file <- tm_map(tm_file, removePunctuation)
+
+#using the tm_map function to the created corpus vector
+tm_map(tm_file, stemDocument, language="english")
+
+
+collection <- DocumentTermMatrix(tm_file)
+tmp_genre_converted <- data.frame(as.matrix(collection))
+sort(colSums(tmp_genre_converted),decreasing = T)[1:10]
+top10_genre_list <- sort(colSums(tmp_genre_converted), decreasing = TRUE) 
+#name_list <- names(top10_genre_list)
+converted_genre_vector <- tmp_genre_converted[,names(top10_genre_list)]
+
+#to sum up the steps that i used for encoding this genre feature, I listed out the 
+#top 10 genres of all the movies and created a collection out of them. 
+#then i assigned binary values to a genre vector which had the genres listed out in order 
+#and had a 1 for a genre listed and matching that in the collection and vice versa
+
+#converting the Production dataset column into an encoded feature
+length(sort(table(test_na$Production), decreasing = T))
+# observing only the top 15 productions 
+sort(table(test_na$Production), decreasing = T)[1:15]
+#Chose the top 5 variables within that dataset column 
+movie_prod <- data.frame(matrix(0, nrow = nrow(test_na), ncol = 5))
+colnames(movie_prod) <- c("war_prod", "uni_prod", "twenty_prod", "para_prod", "sony_prod")
+for(i in seq_along(test_na$Production)){
+  if ( test_na$Production[i] == "Warner Bros. Pictures" ){
+    movie_prod$war_prod[i] <-  1
+  }else if(test_na$Production[i] == "Universal Pictures"){
+    movie_prod$uni_prod[i] <- 1
+  }else if(test_na$Production[i] == "20th Century Fox"){
+    movie_prod$twenty_prod[i] <- 1
+  }else if(test_na$Production[i] == "Paramount Pictures"){
+    movie_prod$para_prod[i] <- 1
+}else if(test_na$Production[i] == "Sony Pictures"){
+    movie_prod$sony_prod[i] <- 1
+}
+}
+
+
+#Transforming awards into an encoded feature
+test_na$Award_Winnings = 0
+test_na$Awards_Nominations = 0
+Not_Award=0
+for(i in 1:nrow(test_na)){
+  val = as.numeric( unlist(
+                         regmatches(test_na[i,'Awards'], gregexpr("+[0-9]+", test_na[i,'Awards']))))
+  if(length(val)[1] == 1)
+  {
+      if((length(grep("win",test_na[i,]$Awards))>0) || (length(grep("won",test_na[i,]$Awards))>0)|| (length(grep("Win",test_na[i,]$Awards))>0)|| (length(grep("Won",test_na[i,]$Awards))>0)){
+      
+      test_na[i,]$Award_Winnings = as.numeric(val[1])          
+    }
+    if(length(grep("nomination",test_na[i,]$Awards))>0){
+         test_na[i,]$Awards_Nominations = as.numeric(val[1])   
+    }
+    
+  }
+  if(length(val)[1] == 2)
+  {
+          if((length(grep("win",test_na[i,]$Awards))>0) || (length(grep("won",test_na[i,]$Awards))>0)|| (length(grep("Win",test_na[i,]$Awards))>0)|| (length(grep("Won",test_na[i,]$Awards))>0)){
+      
+      test_na[i,]$Award_Winnings = as.numeric(val[1])          
+    }
+    if(length(grep("nomination",test_na[i,]$Awards))>0){
+      
+      test_na[i,]$Awards_Nominations = as.numeric(val[2])   
+    }
+    
+  }
+  if(length(val)[1] == 3)
+  {
+          if((length(grep("win",test_na[i,]$Awards))>0) || (length(grep("won",test_na[i,]$Awards))>0)|| (length(grep("Win",test_na[i,]$Awards))>0)|| (length(grep("Won",test_na[i,]$Awards))>0)){
+      
+      test_na[i,]$Award_Winnings = as.numeric(val[2])          
+    }
+    if(length(grep("nomination",test_na[i,]$Awards))>0){
+   
+      test_na[i,]$Awards_Nominations = as.numeric(val[3])   
+    }
+  } 
+  if(length(val)[1] == 0){
+     
+    test_na[i,]$Award_Winnings = 0
+    test_na[i,]$Awards_Nominations = 0
+    Not_Award = Not_Award + 1
+  
+  }
+                         
+}
+
+base_model2 <- cbind( converted_genre_vector,movie_prod,no_of_wins=test_na$Award_Winnings,no_of_noms=test_na$Awards_Nominations,Gross=test_na$Gross)
+row.names(base_model2)<-row.names(numset_test)
+base_model2<-subset(base_model2,select=-c(comedy,romance,thriller,crime,mystery,family,biography,music,sport,history,documentary,war,musical,western,news,no_of_wins,para_prod))
+fitted_model_1 <- lm(Gross~., data = base_model2)
+summary(fitted_model_1)
+
+model3=trainer(base_model2,tmp_train_vals)
+ggplot(model3,aes(sizes))+geom_line(aes(y=model_tr_rms))
+```
+
+**Q**: Explain which categorical variables you used, and how you encoded them into features.
+
+**A**: To sum up the steps that i used for encoding this genre feature, I listed out the top 10 genres of all the movies and created a collection out of them. Then i assigned binary values to a genre vector which had the genres listed out in order and had a 1 for a genre listed and matching that in the collection and vice versa.
+
+I also took the categorical variable Production. Here I took the top 15 values in that dataset to get a total of 5 production fields. I then parsed each of the row of the test dataset to create a vector for that particular variable.
+
+Finally, observing the awards column, I decided to follow the same division methodology I used in the initial Project 1: dividing them into 2 parts awards and nominations respectively. I used the grep functionality to get the number of wins/nominations for each row and built a new vector upon that.
+
+
+**Q**: What is the best mean test RMSE value you observed, and at what training set size? How does this compare with Task 2?
+
+**A**: The best RMSE value I observed was 91483179 at 95% training set size. Compared to the model in task 2, the RMSE values for this has increased drastically. In the third model, the global minima is 70796624 whereas in model 2, it was 46225750. This shows that overall, the RMSE values are increasing. 
+
+
+## 4. Numeric and categorical variables
+
+Try to improve the prediction quality as much as possible by using both numeric and non-numeric variables from **Tasks 2 & 3**.
+
+```{r}
+# TODO: Build & evaluate model 4 (numeric & converted non-numeric variables)
+base_model2<-subset(base_model2,select=-Gross)
+base_model4 <- cbind(base_model2,numset_test_vals)
+fitted_model1 <- lm(Gross~., data = base_model4)
+summary(fitted_model1)
+base_model4<-subset(base_model4,select=-c(tomatoFresh,sony_prod,uni_prod,twenty_prod,horror,fantasy,adventure,drama))
+model4 = trainer(base_model4,tmp_train_vals) 
+ggplot(model4,aes(sizes))+geom_line(aes(y=model_tr_rms))
+```
+
+**Q**: Compare the observed RMSE with Tasks 2 & 3.
+
+**A**: The RMSE values observed for model4 seem to be similar in range to those RMSE values of model2. The model3 values are much higher than both of these values for both the models and model4 seems to have produced the least RMSE values of all the analyses done above.
+
+
+## 5. Additional features
+
+Now try creating additional features such as interactions (e.g. `is_genre_comedy` x `is_budget_greater_than_3M`) or deeper analysis of complex variables (e.g. text analysis of full-text columns like `Plot`).
+
+```{r}
+# TODO: Build & evaluate model 5 (numeric, non-numeric and additional features)
+cat = 1:5
+num = 6:24
+new_feat <- data.frame(matrix(0, nrow = dim(base_model4)[1], ncol= 0))
+new_feat_colnames<-c()
+for (i in num){
+  for (j in cat){
+     tmp <- paste("relate", colnames(base_model4)[i], colnames(base_model4)[j], sep = "_")
+    new_feat_colnames <- c(new_feat_colnames, tmp)
+    cols = base_model4[i] * base_model4[j]
+    new_feat <- cbind(new_feat, cols)
+  }
+}
+colnames(new_feat) <- new_feat_colnames
+new_df <- cbind(base_model4, new_feat)
+fitted_model5 <- lm(Gross~., data = new_df)
+base_model5 <- new_df[, (summary(fitted_model5)$coefficients[, 4] < 0.05)]
+
+model5 = trainer(base_model5,tmp_train_vals) 
+ggplot(model5,aes(sizes))+geom_line(aes(y=model_tr_rms))
+
+```
+
+**Q**: Explain what new features you designed and why you chose them.
+
+**A**: I chose to just create a simple relation between the categorical variables and the numerical variables because the majority of the dataset is based upon the relation between them and how they affect training models.
+
+
+**Q**: Comment on the final RMSE values you obtained, and what you learned through the course of this project.
+
+**A**: The final RMSE value I obtained was 29596824 at a training set size of 100%. One of the key things I learnt from this project was that the selection of features in a model is crucial to whatever future steps might be taken to either process it or train another model based upon it. Choosing the right features improves prediction drastically and we can see that change above in all of the five models described above. Below we can see the difference in the RMSE values for all the trained models.
+```{r}
+allModels<-merge(model1,model2,by="sizes")
+allModels<-merge(allModels,model3,by="sizes")
+allModels<-merge(allModels,model4,by="sizes")
+allModels<-merge(allModels,model5,by="sizes")
+
+colnames(allModels)<-c("sizes","model1","model1_test","model2","model2_test","model3","model3_test","model4","model4_test","model5","model5_test")
+allModels$model1_test <- NULL
+allModels$model2_test <- NULL
+allModels$model3_test <- NULL
+allModels$model4_test <- NULL
+allModels$model5_test <- NULL
+
+ggplot(allModels, aes(sizes)) + geom_line(aes(y = model1, color = "model1"))+
+  geom_line(aes(y = model2, color = "model2")) +
+  geom_line(aes(y = model3, color = "model3")) + 
+  geom_line(aes(y = model4, color = "model4")) +
+  geom_line(aes(y = model5, color = "model5"))
+```
+
+# References: 
+https://stackoverflow.com/questions/32523544/how-to-remove-error-in-term-document-matrix-in-r
+http://stat.ethz.ch/R-manual/R-devel/library/stats/html/lm.html
+https://www.rdocumentation.org/packages/base/versions/3.5.1/topics/seq
+http://kbroman.org/knitr_knutshell/pages/Rmarkdown.html
+

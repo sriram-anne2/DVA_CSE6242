@@ -1,0 +1,7 @@
+temp_m2_df<-subset(temp_m2_df,select=-Gross)
+temp_m4_df <- cbind(temp_m2_df,df_numeric_vals)
+lm_model_1 <- lm(Gross~., data = temp_m4_df)
+summary(lm_model_1)
+temp_m4_df<-subset(temp_m4_df,select=-c(tomatoFresh,pro_sony,pro_universal,pro_20th_cen,horror,fantasy,adventure,drama))
+df_m4 = train_model_helper(temp_m4_df,train_rand) 
+ggplot(df_m4,aes(sampling_list))+geom_line(aes(y=train_rmse,color="train"))
